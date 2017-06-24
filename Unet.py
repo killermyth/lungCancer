@@ -7,7 +7,7 @@
 
 import numpy as np
 from keras.models import Model
-from keras.layers import Input, merge, Convolution2D, MaxPooling2D, UpSampling2D, Dropout
+from keras.layers import Input, merge, Convolution2D, MaxPooling2D, UpSampling2D, Dropout, Cropping2D
 from keras.optimizers import Adam
 from keras.optimizers import SGD
 from keras.callbacks import ModelCheckpoint, LearningRateScheduler
@@ -30,6 +30,24 @@ class Unet(object):
     def __init__(self):
         print 123
 
+    def get_crop_shape(self, target, refer):
+        # width, the 3rd dimension
+        cw = (target.get_shape()[2] - refer.get_shape()[2]).value
+        assert (cw >= 0)
+        if cw % 2 != 0:
+            cw1, cw2 = int(cw / 2), int(cw / 2) + 1
+        else:
+            cw1, cw2 = int(cw / 2), int(cw / 2)
+        # height, the 2nd dimension
+        ch = (target.get_shape()[1] - refer.get_shape()[1]).value
+        assert (ch >= 0)
+        if ch % 2 != 0:
+            ch1, ch2 = int(ch / 2), int(ch / 2) + 1
+        else:
+            ch1, ch2 = int(ch / 2), int(ch / 2)
+
+        return (ch1, ch2), (cw1, cw2)
+
     def dice_coef(self, y_true, y_pred):
         y_true_f = K.flatten(y_true)
         y_pred_f = K.flatten(y_pred)
@@ -41,51 +59,63 @@ class Unet(object):
 
     def get_unet(self):
         inputs = Input((1, 512, 512))
-        conv1 = Convolution2D(64, 3, 3, activation='relu', border_mode='same')(inputs)
+        conv1 = Convolution2D(64, 3, 3, activation='relu', border_mode='same', dim_ordering="th")(inputs)
         conv1 = Dropout(0.2)(conv1)
-        conv1 = Convolution2D(64, 3, 3, activation='relu', border_mode='same')(conv1)
+        conv1 = Convolution2D(64, 3, 3, activation='relu', border_mode='same', dim_ordering="th")(conv1)
         pool1 = MaxPooling2D(pool_size=(2, 2), dim_ordering="th")(conv1)
 
-        conv2 = Convolution2D(128, 3, 3, activation='relu', border_mode='same')(pool1)
+        conv2 = Convolution2D(128, 3, 3, activation='relu', border_mode='same', dim_ordering="th")(pool1)
         conv2 = Dropout(0.2)(conv2)
-        conv2 = Convolution2D(128, 3, 3, activation='relu', border_mode='same')(conv2)
+        conv2 = Convolution2D(128, 3, 3, activation='relu', border_mode='same', dim_ordering="th")(conv2)
         pool2 = MaxPooling2D(pool_size=(2, 2), dim_ordering="th")(conv2)
 
-        conv3 = Convolution2D(256, 3, 3, activation='relu', border_mode='same')(pool2)
+        conv3 = Convolution2D(256, 3, 3, activation='relu', border_mode='same', dim_ordering="th")(pool2)
         conv3 = Dropout(0.2)(conv3)
-        conv3 = Convolution2D(256, 3, 3, activation='relu', border_mode='same')(conv3)
+        conv3 = Convolution2D(256, 3, 3, activation='relu', border_mode='same', dim_ordering="th")(conv3)
         pool3 = MaxPooling2D(pool_size=(2, 2), dim_ordering="th")(conv3)
 
-        conv4 = Convolution2D(512, 3, 3, activation='relu', border_mode='same')(pool3)
+        conv4 = Convolution2D(512, 3, 3, activation='relu', border_mode='same', dim_ordering="th")(pool3)
         conv4 = Dropout(0.2)(conv4)
-        conv4 = Convolution2D(512, 3, 3, activation='relu', border_mode='same')(conv4)
+        conv4 = Convolution2D(512, 3, 3, activation='relu', border_mode='same', dim_ordering="th")(conv4)
         pool4 = MaxPooling2D(pool_size=(2, 2), dim_ordering="th")(conv4)
 
-        conv5 = Convolution2D(1024, 3, 3, activation='relu', border_mode='same')(pool4)
+        conv5 = Convolution2D(1024, 3, 3, activation='relu', border_mode='same', dim_ordering="th")(pool4)
         conv5 = Dropout(0.2)(conv5)
-        conv5 = Convolution2D(1024, 3, 3, activation='relu', border_mode='same')(conv5)
+        conv5 = Convolution2D(1024, 3, 3, activation='relu', border_mode='same', dim_ordering="th")(conv5)
 
-        up6 = merge([UpSampling2D(size=(2, 2))(conv5), conv4], mode='concat', concat_axis=1)
-        conv6 = Convolution2D(512, 3, 3, activation='relu', border_mode='same')(up6)
+        up_conv5 = UpSampling2D(size=(2, 2))(conv5)
+        ch, cw = self.get_crop_shape(conv4, up_conv5)
+        crop_conv4 = Cropping2D(cropping=(ch, cw), dim_ordering="th")(conv4)
+        up6 = merge([up_conv5, crop_conv4], mode='concat', concat_axis=1)
+        conv6 = Convolution2D(512, 3, 3, activation='relu', border_mode='same', dim_ordering="th")(up6)
         conv6 = Dropout(0.2)(conv6)
-        conv6 = Convolution2D(512, 3, 3, activation='relu', border_mode='same')(conv6)
+        conv6 = Convolution2D(512, 3, 3, activation='relu', border_mode='same', dim_ordering="th")(conv6)
 
-        up7 = merge([UpSampling2D(size=(2, 2))(conv6), conv3], mode='concat', concat_axis=1)
-        conv7 = Convolution2D(256, 3, 3, activation='relu', border_mode='same')(up7)
+        up_conv6 = UpSampling2D(size=(2, 2), dim_ordering="th")(conv6)
+        ch, cw = self.get_crop_shape(conv3, up_conv6)
+        crop_conv3 = Cropping2D(cropping=(ch, cw), dim_ordering="th")(conv3)
+        up7 = merge([up_conv6, crop_conv3], mode='concat', concat_axis=1)
+        conv7 = Convolution2D(256, 3, 3, activation='relu', border_mode='same', dim_ordering="th")(up7)
         conv7 = Dropout(0.2)(conv7)
-        conv7 = Convolution2D(256, 3, 3, activation='relu', border_mode='same')(conv7)
+        conv7 = Convolution2D(256, 3, 3, activation='relu', border_mode='same', dim_ordering="th")(conv7)
 
-        up8 = merge([UpSampling2D(size=(2, 2))(conv7), conv2], mode='concat', concat_axis=1)
-        conv8 = Convolution2D(128, 3, 3, activation='relu', border_mode='same')(up8)
+        up_conv7 = UpSampling2D(size=(2, 2), dim_ordering="th")(conv7)
+        ch, cw = self.get_crop_shape(conv2, up_conv7)
+        crop_conv2 = Cropping2D(cropping=(ch, cw), dim_ordering="th")(conv2)
+        up8 = merge([up_conv7, crop_conv2], mode='concat', concat_axis=1)
+        conv8 = Convolution2D(128, 3, 3, activation='relu', border_mode='same', dim_ordering="th")(up8)
         conv8 = Dropout(0.2)(conv8)
-        conv8 = Convolution2D(128, 3, 3, activation='relu', border_mode='same')(conv8)
+        conv8 = Convolution2D(128, 3, 3, activation='relu', border_mode='same', dim_ordering="th")(conv8)
 
-        up9 = merge([UpSampling2D(size=(2, 2))(conv8), conv1], mode='concat', concat_axis=1)
-        conv9 = Convolution2D(64, 3, 3, activation='relu', border_mode='same')(up9)
+        up_conv8 = UpSampling2D(size=(2, 2), dim_ordering="th")(conv8)
+        ch, cw = self.get_crop_shape(conv1, up_conv8)
+        crop_conv1 = Cropping2D(cropping=(ch, cw), dim_ordering="th")(conv1)
+        up9 = merge([up_conv8, crop_conv1], mode='concat', concat_axis=1)
+        conv9 = Convolution2D(64, 3, 3, activation='relu', border_mode='same', dim_ordering="th")(up9)
         conv9 = Dropout(0.2)(conv9)
-        conv9 = Convolution2D(64, 3, 3, activation='relu', border_mode='same')(conv9)
+        conv9 = Convolution2D(64, 3, 3, activation='relu', border_mode='same', dim_ordering="th")(conv9)
 
-        conv10 = Convolution2D(1, 1, 1, activation='sigmoid')(conv9)
+        conv10 = Convolution2D(1, 1, 1, activation='sigmoid', dim_ordering="th")(conv9)
 
         model = Model(input=inputs, output=conv10)
         model.summary()
